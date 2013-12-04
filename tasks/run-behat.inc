@@ -286,17 +286,8 @@ function drake_ci_behat_test($context) {
     }
   }
   else {
-    // Site install.
-    $args = array($profile);
-    $db_url = $db_spec['driver'] . '://' .  $db_spec['username'] . ':' . $db_spec['password'] . '@' . $db_spec['host'] . '/' . $db_spec['database'];
-    $drush_invoke_options['db-url'] = $db_url;
-    $drush_invoke_options['sites-subdir'] = $site_dir;
-
-    drush_log(dt('Installing site %sitedir with profile %profile', array('%sitedir' => $site_dir, '%profile' => $profile)), 'ok');
-    $res = drush_invoke_process(NULL, 'site-install', $args, $drush_invoke_options, TRUE);
-
-    if (!$res || $res['error_status'] != 0) {
-      return drake_action_error(dt('Error installing site.'));
+    if (!drake_ci_behat_site_install($profile, $db_spec, $site_dir, $drush_invoke_options)) {
+      return FALSE;
     }
   }
 
