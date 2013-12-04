@@ -63,6 +63,10 @@ $actions['run-behat'] = array(
       'description' => 'Behat directory relative to the drupal root, defaults to "sites/all/tests/behat" or "profiles/<profile>/tests/behat" if profile is specified',
       'default' => NULL,
     ),
+    'behat-profile' => array(
+      'description' => 'Behat test-profile to use, "default" if unspecified.',
+      'default' => 'default',
+    ),
     'db-su' => 'Database Super-user allowed to create databases',
     'db-su-pw' => array(
       'description' => 'Password for the database Superuser',
@@ -263,7 +267,8 @@ function drake_ci_behat_test($context) {
       $site_settings['conf']['file_private_path'] = 'sites/' . $site_dir . '/private/files';
     }
     else {
-      // A bit harsh, but it will have to do for now.
+      // For now just do the same - but other packages such as archive-dump
+      // should be supported here.
       $site_settings['conf']['file_public_path'] = 'sites/' . $site_dir . '/files';
       $site_settings['conf']['file_temporary_path'] = '/tmp';
       $site_settings['conf']['file_private_path'] = 'sites/' . $site_dir . '/files';
@@ -306,6 +311,8 @@ function drake_ci_behat_test($context) {
     return FALSE;
   }
 
+  // TODO: Run multiple behat instances - in sequence to begin with - then maybe
+  // in parallel.
 
   // Use a temporary log file, to avoid buffers being filled.
   $stdout_logfile = $output_dir . '/behat-saucelabs-' . $port . '-' . posix_getpid() . '.log';
@@ -411,8 +418,6 @@ function drake_ci_behat_test($context) {
   $proc_status = proc_get_status($behat_process);
   $force_exit = FALSE;
   if ($behat_process && $proc_status['running']) {
-    $procs_to_be_cleaned[] = $behat_process;
-
     // Wait for the process to stop.
     do {
       sleep(1);
@@ -440,6 +445,7 @@ function drake_ci_behat_test($context) {
     // TODO: Inject the URL into the behat html-report instead.
     drush_log("Video URL:", 'success');
     $matches = array_unique($matches);
+    $matches_markup = '';
     foreach ($matches as $match) {
       drush_log($match, 'success');
       $matches_markup .= "<li><a href=\"$match\">$match</a>\n";
