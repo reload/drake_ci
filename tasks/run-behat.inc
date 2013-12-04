@@ -374,38 +374,10 @@ function drake_ci_behat_test($context) {
     }
   }
 
-  // Use a temporary log file, to avoid buffers being filled.
-  $log_file = '/tmp/behat-webserver' . $port . '-' . posix_getpid() . '.log';
-  drush_register_file_for_deletion($log_file);
-  $descriptorspec = array(
-    0 => array('file', '/dev/null', 'r'),
-    1 => array('file', '/dev/null', 'w'),
-    2 => array('file', $log_file, 'w'),
-  );
-
-  // We'd like to use drush runserver instead, but in initial testing runserver
-  // would cause core tests to fail on login, while this would not.
-
-  $cmd = $context['php'] . ' -t ' . $context['root'] . ' -S ' . $site_local_uri . ' ' . dirname(dirname(__FILE__)) . '/router.php';
-  drush_log("Executing command " . $cmd, 'debug');
-  $php_process = proc_open($cmd, $descriptorspec, $pipes, $context['root']);
-  register_shutdown_function('_drake_ci_kill_process_shutdown', $php_process);
-
-  // Wait a sec.
-  sleep(1);
-  // Then check that the server started.
-  $proc_status = proc_get_status($php_process);
-  if (!$php_process || !$proc_status['running']) {
-    return drake_action_error(dt('Could not start internal web server.'));
+  if (!drake_ci_behat_start_webserver($site_local_uri, $port, $context)) {
+    return FALSE;
   }
-  $procs_to_be_cleaned[] = $php_process;
 
-  drush_log(dt('Webserver running at http://%host:%port %proc',
-    array(
-         '%host' => $context['site-host'],
-         '%port' => $port,
-         '%proc' => $php_process)
-  ), 'ok');
 
   // Use a temporary log file, to avoid buffers being filled.
   $stdout_logfile = $output_dir . '/behat-saucelabs-' . $port . '-' . posix_getpid() . '.log';
@@ -575,6 +547,76 @@ EOT;
 }
 
 /**
+ * @param $site_local_uri
+ * @param $port
+ * @param $context
+ * @return bool
+ */
+function drake_ci_behat_start_webserver($site_local_uri, $port, $context) {
+// Get a webserver up and running.
+
+  // Use a temporary log file, to avoid buffers being filled.
+  $log_file = '/tmp/behat-webserver' . $port . '-' . posix_getpid() . '.log';
+  drush_register_file_for_deletion($log_file);
+  $descriptorspec = array(
+    0 => array('file', '/dev/null', 'r'),
+    1 => array('file', '/dev/null', 'w'),
+    2 => array('file', $log_file, 'w'),
+  );
+
+  // We'd like to use drush runserver instead, but in initial testing runserver
+  // would cause core tests to fail on login, while this would not.
+
+  $cmd = $context['php'] . ' -t ' . $context['root'] . ' -S ' . $site_local_uri . ' ' . dirname(dirname(__FILE__)) . '/router.php';
+  drush_log("Executing command " . $cmd, 'debug');
+  $php_process = proc_open($cmd, $descriptorspec, $pipes, $context['root']);
+  register_shutdown_function('_drake_ci_kill_process_shutdown', $php_process);
+
+  // Wait a sec.
+  sleep(1);
+  // Then check that the server started.
+  $proc_status = proc_get_status($php_process);
+  if (!$php_process || !$proc_status['running']) {
+    return drake_action_error(dt('Could not start internal web server.'));
+  }
+
+  drush_log(dt('Webserver running at http://%host:%port %proc',
+    array(
+      '%host' => $context['drupal-multisite-host'],
+      '%port' => $port,
+      '%proc' => $php_process
+    )
+  ), 'ok');
+  return TRUE;
+}
+
+/**
+ * @param $profile
+ * @param $db_spec
+ * @param $site_dir
+ * @param $drush_invoke_options
+ * @return bool
+ */
+function drake_ci_behat_site_install($profile, $db_spec, $site_dir, $drush_invoke_options) {
+// Site install.
+  $args = array($profile);
+  $db_url = $db_spec['driver'] . '://' . $db_spec['username'] . ':' . $db_spec['password'] . '@' . $db_spec['host'] . '/' . $db_spec['database'];
+  $drush_invoke_options['db-url'] = $db_url;
+  $drush_invoke_options['sites-subdir'] = $site_dir;
+
+  drush_log(dt('Installing site %sitedir with profile %profile', array(
+    '%sitedir' => $site_dir,
+    '%profile' => $profile
+  )), 'ok');
+  $res = drush_invoke_process(NULL, 'site-install', $args, $drush_invoke_options, TRUE);
+
+  if (!$res || $res['error_status'] != 0) {
+    return drake_action_error(dt('Error installing site.'));
+  }
+  else {
+    return TRUE;
+  }
+}
  * Shutdown function drop a database.
  */
 function _drake_ci_drop_db_shutdown($db_spec) {
