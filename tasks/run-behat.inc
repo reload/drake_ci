@@ -230,28 +230,9 @@ function drake_ci_behat_test($context) {
     }
   }
 
-  $db_spec = array(
-    'driver' => 'mysql',
-    'database' => (strlen($profile) > 8 ? substr($profile, 0, 8) : $profile) . "_" . $port,
-    'host' => 'localhost',
-    'username' => $context['db-su'],
-    'password' => $context['db-su-pw'],
-    'port' => 3306,
-    'prefix' => '',
-    'collation' => 'utf8_general_ci',
-  );
-  // Create the database, this requires the db-su user to have a CREATE DATABASE
-  // grant.
-  if (!_drush_sql_create($db_spec)) {
-    return drake_action_error(dt('Could not create database %database.', array('%database', $db_spec['database'])));
-  }
-  else {
-    drush_log(dt('Created temporary database %dbname', array('%dbname' => $db_spec['database'])));
-  }
-
-  // Make sure the database gets dropped at exit.
-  if ($cleanup) {
-    register_shutdown_function('_drake_ci_drop_db_shutdown', $db_spec);
+  // Create a database based on the profile-name and port-number.
+  if (!($db_spec = drake_ci_behat_setup_db($profile, $port, $context, $cleanup))) {
+    return FALSE;
   }
 
   // Setup settings.php
@@ -300,23 +281,9 @@ function drake_ci_behat_test($context) {
   $drush_invoke_options['uri'] = $site_local_uri;
 
   if (file_exists($sqldump_path)) {
-    // Database-dump found.
-    drush_log(dt('Importing database.sql into the database %dbname', array('%dbname' => $db_spec['database'])), 'ok');
-    $success = _drush_sql_query(NULL, $db_spec, $sqldump_path);
-    // Import database.
-    if (!$success) {
-      return drake_action_error(dt('Could not import database-dump from %dump.', array('%dump', $target_site_path . '/database.sql')));
+    if (!drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options)) {
+      return FALSE;
     }
-
-    // Clear cache as the imported database might contains some paths that needs
-    // updating.
-    drush_log('Flushing site-cache after database-import', 'ok');
-    $res = drush_invoke_process(NULL, 'cache-clear', array('all'), $drush_invoke_options, TRUE);
-
-    if (!$res || $res['error_status'] != 0) {
-      return drake_action_error(dt('Error clearing cache.'));
-    }
-
   }
   else {
     // Site install.
@@ -576,6 +543,75 @@ function drake_ci_behat_site_install($profile, $db_spec, $site_dir, $drush_invok
     return TRUE;
   }
 }
+
+/**
+ * @param $sqldump_path
+ * @param $db_spec
+ * @param $drush_invoke_options
+ * @return bool
+ */
+function drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options) {
+// Database-dump found.
+  drush_log(dt('Importing database.sql into the database %dbname', array('%dbname' => $db_spec['database'])), 'ok');
+  $success = _drush_sql_query(NULL, $db_spec, $sqldump_path);
+  // Import database.
+  if (!$success) {
+    return drake_action_error(dt('Could not import database-dump from %dump.', array(
+      '%dump',
+      $sqldump_path
+    )));
+  }
+
+  // Clear cache as the imported database might contains some paths that needs
+  // updating.
+  drush_log('Flushing site-cache after database-import', 'ok');
+  $res = drush_invoke_process(NULL, 'cache-clear', array('all'), $drush_invoke_options, TRUE);
+
+  if (!$res || $res['error_status'] != 0) {
+    return drake_action_error(dt('Error clearing cache.'));
+  }
+  else {
+    return TRUE;
+  }
+}
+
+/**
+ * @param $profile
+ * @param $port
+ * @param $context
+ * @param $cleanup
+ * @return bool
+ */
+function drake_ci_behat_setup_db($profile, $port, $context, $cleanup) {
+// Create a database for the site.
+  $db_spec = array(
+    'driver'    => 'mysql',
+    'database'  => (strlen($profile) > 8 ? substr($profile, 0, 8) : $profile) . "_" . $port,
+    'host'      => 'localhost',
+    'username'  => $context['db-su'],
+    'password'  => $context['db-su-pw'],
+    'port'      => 3306,
+    'prefix'    => '',
+    'collation' => 'utf8_general_ci',
+  );
+  // This requires the db-su user to have a CREATE DATABASE grant.
+  if (!_drush_sql_create($db_spec)) {
+    return drake_action_error(dt('Could not create database %database.', array(
+      '%database',
+      $db_spec['database']
+    )));
+  }
+  else {
+    drush_log(dt('Created temporary database %dbname', array('%dbname' => $db_spec['database'])));
+  }
+
+  // Make sure the database gets dropped at exit.
+  if ($cleanup) {
+    register_shutdown_function('_drake_ci_drop_db_shutdown', $db_spec);
+  }
+  return $db_spec;
+}
+
 /**
  * @param $site_dir
  * @param $target_site_path
