@@ -14,15 +14,16 @@ $tasks['ci-run-behat'] = array(
   'selenium-wd-host' => context_optional('selenium-wd-host'),
   // TODO: Get this from the main site?
   'profile' => context_optional('profile'),
-  'site-port' => context_optional('site-port'),
-  'site-host' => context_optional('site-host'),
-  'test-port' => context_optional('test-port'),
-  'test-host' => context_optional('test-host'),
+  'behat-profile' => context_optional('behat-profile'),
+  'drupal-multisite-port' => context_optional('drupal-multisite-port'),
+  'drupal-multisite-host' => context_optional('drupal-multisite-host'),
+  'external-site-port' => context_optional('external-site-port'),
+  'external-site-host' => context_optional('external-site-host'),
   'output-dir' => context_optional('output-dir', context('[@self:site:root]/tests/behat')),
   'behat-features' => context_optional('behat-features'),
   'behat-config' => context_optional('behat-config'),
   'behat-dir' => context_optional('behat-dir'),
-  'generate-sites-php' => context_optional('generate-sites-php'),
+  'no-generate-sites-php' => context_optional('no-generate-sites-php'),
 );
 
 // See http://saucelabs.com/docs/additional-config#desired-capabilities
@@ -84,20 +85,20 @@ $actions['run-behat'] = array(
       'description' => 'Remote Webdriver desired capabilities, see http://saucelabs.com/docs/additional-config#desired-capabilities if set this value will override any ' . SELENIUM_CAP_PREFIX . "-* parameters",
       'default' => NULL,
     ),
-    'site-port' => array(
+    'drupal-multisite-port' => array(
       'description' => 'Port to use for the temporary site, default is to pick a random port',
       'default' => NULL,
     ),
-    'site-host' => array(
+    'drupal-multisite-host' => array(
       'description' => 'Hostname of the site, should be accessible to saucelabs',
       'default' => 'localhost',
     ),
-    'test-port' => array(
-      'description' => 'Use if the public port as seen from saucelabs is different from the local port specified via site-port',
+    'external-site-port' => array(
+      'description' => 'Use if the public port as seen from saucelabs is different from the local port specified via drupal-multisite-port',
       'default' => NULL,
     ),
-    'test-host' => array(
-      'description' => 'Use if the public hostname as seen from saucelab is different from the hostname specified via site-host',
+    'external-site-host' => array(
+      'description' => 'Use if the public hostname as seen from saucelab is different from the hostname specified via drupal-multisite-host',
       'default' => NULL,
     ),
     'profile' => array(
@@ -112,11 +113,10 @@ $actions['run-behat'] = array(
       'description' => 'Maximum number of seconds we should wait for Behat to execute',
       'default' => 60 * 60,
     ),
-    'generate-sites-php' => array(
-      'description' => 'Generate a sites.php if site-host and test-host differs',
+    'no-generate-sites-php' => array(
+      'description' => 'Do not generate a sites.php if drupal-multisite-host and external-site-host differs',
       'default' => FALSE,
     ),
-    // TODO: Allow modules to be enabled/disabled prior to execution.
   ),
 );
 
@@ -141,13 +141,14 @@ function drake_ci_behat_test($context) {
 
   // If port was not specified, pick a random port. With so many to choose from,
   // we're unlikely to collide.
-  $port = !empty($context['site-port']) ? $context['site-port'] : mt_rand(50000, 60000);
-  $site_local_uri = $context['site-host'] . ':' . $port;
+  $port = !empty($context['drupal-multisite-port']) ? $context['drupal-multisite-port'] : mt_rand(50000, 60000);
+
+  $site_local_uri = $context['drupal-multisite-host'] . ':' . $port;
 
   $cleanup = !((bool) $context['no-cleanup']);
-  $site_dir = $port . '.' . $context['site-host'];
   $profile = empty($context['profile']) ? 'default' : $context['profile'];
-  $target_site_path = $context['root'] . '/sites/' . $site_dir;
+
+  $behat_profiles = explode(',', $context['behat-profile']);
 
   // Make output-dir absolute.
   if (strpos($context['output-dir'], '/') !== 0) {
@@ -189,18 +190,24 @@ function drake_ci_behat_test($context) {
     return TRUE;
   }
 
+  // Check output directory.
+  if (!is_dir($output_dir) && !mkdir($output_dir, 0777, TRUE)) {
+    return drake_action_error(dt('Could not access or create output-dir "%dir"', array('%dir', $output_dir)));
+  }
+
+
   // Contexts processed, carry on with the actual work.
+
+  // TODO Extract the entire "setup a site-dir" into a function / task.
+  $site_dir = $port . '.' . $context['drupal-multisite-host'];
+  $target_site_path = $context['root'] . '/sites/' . $site_dir;
+
   // If the site dir exists, move it out of the way.
   if (file_exists($target_site_path)) {
     $new_name = $context['root'] . '/sites/' . $site_dir . '_archived_' . time();;
     if (!rename($target_site_path, $new_name)) {
       return drake_action_error(dt('Site_dir %site_dir already exists and could not rename it, exiting.', array('%site_dir' => $site_dir)));
     }
-  }
-
-  // Check output directory.
-  if (!is_dir($output_dir) && !mkdir($output_dir, 0777, TRUE)) {
-    return drake_action_error(dt('Could not access or create output-dir "%dir"', array('%dir', $output_dir)));
   }
 
   // Prepare the sitedir, cd to it so that we can unpack the baseline package
@@ -212,12 +219,12 @@ function drake_ci_behat_test($context) {
     drush_register_file_for_deletion($target_site_path, TRUE);
   }
 
-  // Prepare a sites.php if site-host is set.
-  if (!empty($context['test-host']) && $context['test-host'] != $context['site-host']) {
-    if (!$context['generate-sites-php']) {
+  // Prepare a sites.php if drupal-multisite-host is set.
+  if (!empty($context['external-site-host']) && $context['external-site-host'] != $context['drupal-multisite-host']) {
+    if ($context['no-generate-sites-php']) {
       // Entry in sites.php needed by auto-generation is disabled (default).
       // Issue a warning and continue.
-      drush_log("test-host and site-host differs, please make sure sites.php maps the external hostname to the local site or enable automatic sites.php generation via generate-sites-php", 'warning');
+      drush_log("external-site-host and drupal-multisite-host differs and automatic sites.php generation is disabled via no-generate-sites-php, please make sure sites.php maps the external hostname.", 'warning');
     }
     else {
       // Generate a new sites.php while preserving any existing.
