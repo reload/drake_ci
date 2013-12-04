@@ -1,4 +1,8 @@
 <?php
+use Symfony\Component\Yaml\Exception\ParseException;
+use Symfony\Component\Yaml\Parser;
+use Symfony\Component\Yaml\Dumper;
+require dirname(__FILE__) . '/../vendor/autoload.php';
 
 $tasks['ci-run-behat'] = array(
   'action' => 'run-behat',
@@ -339,50 +343,56 @@ function drake_ci_behat_test($context) {
 
   $behat_config = $context['behat-config'];
 
-  // TODO: use a YAML parser.
-  // Inject the video-url logger extension into behat-config.
+  // Create runtime behat-configuration with the video-url logger extension
+  // injected.
   $behat_config_full = $behat_dir . '/' . $behat_config;
-  if (!file_exists($behat_config_full) || !is_writable($behat_config_full)) {
-    return drake_action_error(dt('Could not update behat-config %file, either file could not be found or written to.', array('%file' => $behat_config_full)));
+  if (!file_exists($behat_config_full) ) {
+    return drake_action_error(dt('Could not update find the behat-config %file.', array('%file' => $behat_config_full)));
   }
-  copy($behat_config_full, $behat_config_content . "_org");
-  $behat_config_content = file_get_contents($behat_config_full);
-  // Make sure the extension is not already in there.
-  if (!preg_match('/log_videourl.php/m', $behat_config_content)) {
-    // A bit crude, but should work for now.
-    $behat_extension_path = "'" . dirname(__FILE__) . "/../behat_extensions/log_videourl.php': ~";
-    // Find the extesions: entry, inject an indented entry after it.
-    $behat_config_content = preg_replace('/(\s+)(extensions:).*$/m', "\$1\$2\$1  " . $behat_extension_path, $behat_config_content);
-
-    // Preserve the original file.
-    copy($behat_config_full, $behat_config_full . '_org');
-    file_put_contents($behat_config_full, $behat_config_content);
-
-    // Make sure we move the original file back.
-    register_shutdown_function(function() use ($behat_config_full){
-      rename($behat_config_full . '.org', $behat_config_full);
-    });
+  $yaml = new Parser();
+  try {
+    $config_parsed = $yaml->parse(file_get_contents($behat_config_full));
+  } catch (ParseException $e) {
+    return drake_action_error(
+      dt("Unable to parse the behat-configuration at : %file\n Error-message: %error",
+        array(
+          '%file' => $behat_config_full,
+          '%error' => $e->getMessage(),
+        )
+      )
+    );
   }
+  $behat_runtime_config = tempnam(sys_get_temp_dir(), 'behat-');
+  $config_parsed = drake_ci_behat_update_config($config_parsed, $context, $port);
+
+  $dumper = new Dumper();
+  $dumper->setIndentation(2);
+  $yaml = $dumper->dump($config_parsed, 5);
+  file_put_contents($behat_runtime_config, $yaml);
+  drush_log("Dumping updated behat-configuration to  " . $behat_runtime_config, 'debug');
+
+  // Make sure we delete the temp-file after execution.
+  register_shutdown_function(function() use ($behat_runtime_config){
+    unlink($behat_runtime_config);
+  });
+
   $behat_features = $context['behat-features'];
-
-  $behat_proc_env = $_ENV;
-  $behat_proc_env['MINK_EXTENSION_PARAMS'] = http_build_query($mink_extension_params);
-
-  // Prepare a string-version for debugging.
-  $behat_proc_env_pretty = array();
-  foreach ($behat_proc_env as $key => $value) {
-    $behat_proc_env_pretty[] = $key . '=' . $value;
-  }
-  $behat_proc_env_pretty = implode(':', $behat_proc_env_pretty);
 
   // The HTML and Junit formatter needs a file and dir respectivly.
   $out_html = $output_dir . '/behat-result.html';
   $out_junit = $output_dir;
 
-  $cmd = 'behat -v -c ' . escapeshellarg($behat_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
-  drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir with environment %env', array('%dir' => $behat_dir, '%env' => $behat_proc_env_pretty)), 'debug');
-  drush_log(dt('Starting behat session named %session', array('%session' => $context['selenium-cap-name'])), 'ok');
-  $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir, $behat_proc_env);
+  // We only support a single profile for now.
+  $behat_profile = $behat_profiles[0];
+  // The session-name may have been merged with an existing one in the config
+  // so pull it out of the parsed and updated config.
+  // TODO: Has to be cleaner way to do this.
+  $session_name = $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['capabilities']['name'];
+
+  $cmd = 'behat -v -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
+  drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir', array('%dir' => $behat_dir)), 'debug');
+  drush_log(dt('Starting behat session named %session', array('%session' => $session_name)), 'ok');
+  $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir);
   register_shutdown_function('_drake_ci_kill_process_shutdown', $behat_process);
 
   $max_executiontime = $context['max-executiontime'];
@@ -683,6 +693,99 @@ function drake_ci_behat_generate_sitesphp($site_dir, $context) {
   fclose($fh);
   return TRUE;
 }
+
+/**
+ * Takes in a parsed behat configuration and updates it with overrides from the
+ * context.
+ *
+ * @param $config_parsed
+ * @param $context
+ * @param $webserver_port
+ * @return mixed
+ */
+function drake_ci_behat_update_config($config_parsed, $context, $webserver_port) {
+  $behat_extension_path = dirname(__FILE__) . '/../behat_extensions/log_videourl.php';
+
+  // Prepare the configurations we want to inject.
+  // TODO: NUKE this and update the behat config instead.
+  $base_url = 'http://';
+
+  if (!empty($context['external-site-host'])) {
+    $base_url .= $context['external-site-host'];
+  } else {
+    $base_url .= $context['drupal-multisite-host'];
+  }
+  $base_url .= ':';
+
+  if(!empty($context['external-site-port'])) {
+    $base_url .= $context['external-site-port'];
+  } else {
+    $base_url .= $webserver_port;
+  }
+
+  if (!empty($context['selenium-wd-host'])) {
+    $inject_config['wd_host'] = $context['selenium-wd-host'];
+  }
+
+  if (!empty($context['capabilities'])) {
+    $inject_config['capabilities'] = $context['capabilities'];
+  }
+  else {
+    // Extract capabillities dynamically.
+    // Generate name if not specified.
+    $caps = array();
+    if (empty($context['selenium-cap-name'])) {
+      $context['selenium-cap-name'] = $context['drupal-multisite-host'] . '-' . $context['profile'] . '-' . date("YmdHis");
+    }
+
+    // Strip off the prefix, and we now have the key for the behat-config-file.
+    foreach ($context as $key => $value) {
+      if (strpos($key, SELENIUM_CAP_PREFIX) === 0 && !empty($value)) {
+        $inject_config['capabilities'][substr($key, strlen(SELENIUM_CAP_PREFIX))] = $value;
+      }
+    }
+  }
+
+  // Outer level is the profile.
+  foreach ($config_parsed as $profile_name => $profile_configuration) {
+    // Make sure this is a potential saucelabs-profile.
+    if (!isset($profile_configuration['extensions']['Behat\MinkExtension\Extension']['selenium2'])) {
+      continue;
+    }
+
+    // Add the video-logger extension.
+    $config_parsed[$profile_name]['extensions'][$behat_extension_path] = NULL;
+
+    // Add a shortcut to make the following code more readable.
+    $selenium_config =& $config_parsed[$profile_name]['extensions']['Behat\MinkExtension\Extension']['selenium2'];
+
+    // Manual merge of two levels of array, the outer is the general selenium
+    // config, underneath-that there is a capabilities level.
+    // In general the inject values wins, except for the name that gets merged
+    // in case of a collision.
+    foreach($inject_config as $outer_name => $outer_value) {
+      if ($outer_name == 'capabilities') {
+        continue;
+      }
+      $selenium_config[$outer_name] = $outer_value;
+    }
+
+    // Merge in the capabilities level.
+    if (!empty($inject_config['capabilities'])) {
+      foreach($inject_config['capabilities'] as $cap_name => $cap_value) {
+        if ($cap_name == 'name' && !empty($selenium_config['capabilities']['name'])) {
+          // Prefix with the original value.
+          $cap_value = $selenium_config['capabilities']['name'] . ' - ' . $cap_value;
+        }
+        $selenium_config['capabilities'][$cap_name] = $cap_value;
+      }
+    }
+  }
+
+  return $config_parsed;
+}
+
+/**
  * Shutdown function drop a database.
  */
 function _drake_ci_drop_db_shutdown($db_spec) {
