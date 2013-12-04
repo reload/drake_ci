@@ -245,29 +245,9 @@ function drake_ci_behat_test($context) {
   }
 
   if (file_exists($context['baseline-package'])) {
-    // Cd to the site-directory to untar the baseline package.
-    $oldcwd = getcwd();
-    chdir($target_site_path);
-
-    // Unpack baseline package.
-    // Method taken from backup.provision.inc from aegirs provision.
-    $command = 'gunzip -c %s | tar pxf -';
-    drush_log(dt('Running: %command in %target',
-      array(
-           '%command' => sprintf($command, $context['baseline-package']),
-           '%target'  => $target_site_path,
-      )
-    ));
-    $pathinfo = pathinfo($context['baseline-package']);
-    drush_log(dt('Unpacking baseline package %package into %target.', array('%package' => $pathinfo['filename'], '%target' => $site_dir)), 'ok');
-
-    $result = drush_shell_exec($command, $context['baseline-package']);
-
-    // Done, go back to original dir.
-    chdir($oldcwd);
-
-    if (!$result) {
-      return drake_action_error(dt('Could not unpack baseline package %package into the temporary site-dir %target.', array('%package' => $context['baseline-package'], '%target' => $target_site_path)));
+    // Unpack the baseline package into the specified target site-path.
+    if (!drake_ci_behat_extract_baseline($site_dir, $target_site_path, $context)) {
+      return FALSE;
     }
   }
 
@@ -612,6 +592,47 @@ function drake_ci_behat_site_install($profile, $db_spec, $site_dir, $drush_invok
 
   if (!$res || $res['error_status'] != 0) {
     return drake_action_error(dt('Error installing site.'));
+  }
+  else {
+    return TRUE;
+  }
+}
+/**
+ * @param $site_dir
+ * @param $target_site_path
+ * @param $context
+ * @return bool
+ */
+function drake_ci_behat_extract_baseline($site_dir, $target_site_path, $context) {
+// Cd to the site-directory to untar the baseline package.
+  $oldcwd = getcwd();
+  chdir($target_site_path);
+
+  // Unpack baseline package.
+  // Method taken from backup.provision.inc from aegirs provision.
+  $command = 'gunzip -c %s | tar pxf -';
+  drush_log(dt('Running: %command in %target',
+    array(
+      '%command' => sprintf($command, $context['baseline-package']),
+      '%target'  => $target_site_path,
+    )
+  ));
+  $pathinfo = pathinfo($context['baseline-package']);
+  drush_log(dt('Unpacking baseline package %package into %target.', array(
+    '%package' => $pathinfo['filename'],
+    '%target'  => $site_dir
+  )), 'ok');
+
+  $result = drush_shell_exec($command, $context['baseline-package']);
+
+  // Done, go back to original dir.
+  chdir($oldcwd);
+
+  if (!$result) {
+    return drake_action_error(dt('Could not unpack baseline package %package into the temporary site-dir %target.', array(
+      '%package' => $context['baseline-package'],
+      '%target'  => $target_site_path
+    )));
   }
   else {
     return TRUE;
