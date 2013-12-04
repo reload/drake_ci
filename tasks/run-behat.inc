@@ -216,31 +216,10 @@ function drake_ci_behat_test($context) {
       drush_log("test-host and site-host differs, please make sure sites.php maps the external hostname to the local site or enable automatic sites.php generation via generate-sites-php", 'warning');
     }
     else {
-      // User has requested a sites.php to be generated automatically, generate
-      // one while preserving any existing sites.php by moving it out of the way
-      // temporarily.
-      $sites_php = $context['root'] . '/sites/' . 'sites.php';
-      if (file_exists($sites_php)) {
-        if (!rename($sites_php, $sites_php . "_org")) {
-          return drake_action_error(dt('Could not rename %file.', array('%file', $sites_php)));
-        }
+      // Generate a new sites.php while preserving any existing.
+      if(!drake_ci_behat_generate_sitesphp($site_dir, $context)){
+        return FALSE;
       }
-
-      // Make sure the original file is restored after we are done.
-      register_shutdown_function(function () use ($sites_php) {
-        unlink($sites_php);
-        rename($sites_php . "_org", $sites_php);
-      });
-
-      // Write our own sites.php truncating any existing file.
-      $fh = fopen($sites_php, 'w+');
-      if (!$fh) {
-        return drake_action_error(dt('Could not write to %file, the file needs to be updated as test-host differs from site-host.', array('%file', $sites_php)));
-      }
-      $buffer = "<?php\n";
-      $buffer .= "\$sites['" . $context['test-host'] . "'] = '" . $site_dir . "';\n";
-      fwrite($fh, $buffer);
-      fclose($fh);
     }
   }
 
@@ -637,6 +616,45 @@ function drake_ci_behat_extract_baseline($site_dir, $target_site_path, $context)
   else {
     return TRUE;
   }
+}
+
+/**
+ * Generate a new sites.php while preserving any existing sites.php by moving it
+ * out of the way temporarily.
+ * @param $context
+ * @param $site_dir
+ * @return bool
+ */
+function drake_ci_behat_generate_sitesphp($site_dir, $context) {
+  $sites_php = $context['root'] . '/sites/' . 'sites.php';
+  if (file_exists($sites_php)) {
+    if (!rename($sites_php, $sites_php . "_org")) {
+      return drake_action_error(dt('Could not rename %file.', array(
+        '%file',
+        $sites_php
+      )));
+    }
+  }
+
+  // Make sure the original file is restored after we are done.
+  register_shutdown_function(function () use ($sites_php) {
+    unlink($sites_php);
+    rename($sites_php . "_org", $sites_php);
+  });
+
+  // Write our own sites.php truncating any existing file.
+  $fh = fopen($sites_php, 'w+');
+  if (!$fh) {
+    return drake_action_error(dt('Could not write to %file, the file needs to be updated as external-site-host differs from drupal-multisite-host.', array(
+      '%file',
+      $sites_php
+    )));
+  }
+  $buffer = "<?php\n";
+  $buffer .= "\$sites['" . $context['external-site-host'] . "'] = '" . $site_dir . "';\n";
+  fwrite($fh, $buffer);
+  fclose($fh);
+  return TRUE;
 }
  * Shutdown function drop a database.
  */
