@@ -353,6 +353,7 @@ function drake_ci_behat_test($context) {
   $out_html = $output_dir . '/behat-result.html';
   $out_junit = $output_dir;
 
+  // TODO Loop over profiles here.
   // We only support a single profile for now.
   $behat_profile = $behat_profiles[0];
   if (empty($config_parsed[$behat_profile])) {
@@ -412,6 +413,7 @@ function drake_ci_behat_test($context) {
     // TODO: we only do this to get the progress, would be nicer to just allow
     // it to go to stdout directly.
     $stdout_content = file($stdout_logfile);
+    $matches = array();
     foreach ($stdout_content as $line) {
       if (preg_match('#saucelabs.com/jobs#', $line)) {
         $matches[] = $line;
@@ -421,14 +423,17 @@ function drake_ci_behat_test($context) {
       }
     }
 
-    // Log the video-url via drush, and generate a html-report.
-    // TODO: Inject the URL into the behat html-report instead.
-    drush_log("Video URL:", 'success');
-    $matches = array_unique($matches);
     $matches_markup = '';
-    foreach ($matches as $match) {
-      drush_log($match, 'success');
-      $matches_markup .= "<li><a href=\"$match\">$match</a>\n";
+    if (!empty($matches)) {
+      // Log the video-url via drush, and generate a html-report.
+      // TODO: Inject the URL into the behat html-report instead.
+      drush_log("Video URL:", 'success');
+      $matches = array_unique($matches);
+      $matches_markup = '';
+      foreach ($matches as $match) {
+        drush_log($match, 'success');
+        $matches_markup .= "<li><a href=\"$match\">$match</a>\n";
+      }
     }
     $report = <<<EOT
 <html><head></head><body>
@@ -559,7 +564,7 @@ function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $cont
     array(
       '%host' => $context['drupal-multisite-host'],
       '%port' => $port,
-      '%proc' => $php_process
+      '%proc' => $php_process,
     )
   ), 'ok');
   return TRUE;
@@ -861,3 +866,4 @@ function _drake_ci_drop_db_shutdown($db_spec) {
     drush_log(dt('Could not drop database, unsupported driver "%driver"', array('%driver' => $db_spec['driver'])));
   }
 }
+
