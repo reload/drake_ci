@@ -11,6 +11,7 @@ $tasks['ci-run-behat'] = array(
   'db-su' => context('db-su'),
   'db-su-pw' => context_optional('db-su-pw'),
   'php' => context_optional('php'),
+  'phantomjs-path' => context_optional('phantomjs-path'),
   'selenium-wd-host' => context_optional('selenium-wd-host'),
   // TODO: Get this from the main site?
   'profile' => context_optional('profile'),
@@ -75,6 +76,10 @@ $actions['run-behat'] = array(
     'php' => array(
       'description' => 'full path to the php-executable to use, defaults to php (ie. first php on path)',
       'default' => 'php',
+    ),
+    'phantomjs-path' => array(
+      'description' => 'full path to the phantomjs-executable to use if the browser is phantomjs',
+      'default' => NULL,
     ),
     'selenium-wd-host' => array(
       'description' => 'Webdriver host',
@@ -364,6 +369,18 @@ function drake_ci_behat_test($context) {
   // TODO: Has to be cleaner way to do this.
   $session_name = $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['capabilities']['name'];
 
+  // Prepare for phantomjs if nessecary.
+  if (!empty($config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'])
+    && $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'] == 'phantomjs') {
+    $wd_url = drake_ci_behat_start_phantomjs($context['phantomjs-path']);
+    if (!$wd_url) {
+      return FALSE;
+    }
+    else {
+      $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['wd_host'] = $wd_url;
+    }
+  }
+
   // Hack for now - behat has a problem with capabilities with dashes, so to fix
   // this we use an environment-variable to specify them as it circumvent the
   // faulty code.
@@ -568,6 +585,49 @@ function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $cont
     )
   ), 'ok');
   return TRUE;
+}
+
+
+function drake_ci_behat_start_phantomjs($executable_path = NULL) {
+  if (empty($executable_path)) {
+    $executable_path = 'phantomjs';
+  }
+  $port = mt_rand(40000, 50000);;
+
+  $log_file = '/tmp/behat-phantomjs' . $port . '-' . posix_getpid() . '.log';
+  // Use a temporary log file, to avoid buffers being filled.
+  drush_register_file_for_deletion();
+  $descriptorspec = array(
+    0 => array('file', '/dev/null', 'r'),
+    1 => array('file', '/dev/null', 'w'),
+    2 => array('file', $log_file, 'w'),
+  );
+
+  // We'd like to use drush runserver instead, but in initial testing runserver
+  // would cause core tests to fail on login, while this would not.
+
+  $cmd = $executable_path . ' --webdriver=' . $port;
+  drush_log("Executing command " . $cmd, 'debug');
+  $phantom_process = proc_open($cmd, $descriptorspec, $pipes);
+  register_shutdown_function('_drake_ci_kill_process_shutdown', $phantom_process);
+
+  // Wait a sec.
+  sleep(1);
+  // Then check that the server started.
+  $proc_status = proc_get_status($phantom_process);
+  if (!$phantom_process || !$proc_status['running']) {
+    return drake_action_error(dt('Could not start phantomjs.'));
+  }
+
+  $wd_url = "http://localhost:$port/wd/hub";
+
+  drush_log(dt('Phantomjs running at WebDriver "%wd_url" %proc',
+    array(
+      '%wd_url' => $wd_url,
+      '%proc' => $phantom_process
+    )
+  ), 'ok');
+  return $wd_url;
 }
 
 /**
