@@ -355,6 +355,9 @@ function drake_ci_behat_test($context) {
 
   // We only support a single profile for now.
   $behat_profile = $behat_profiles[0];
+  if (empty($config_parsed[$behat_profile])) {
+    return drake_action_error(dt('Unable to find behat-profile "%profile" in behat-configurationfile', array('%profile' => $behat_profile)));
+  }
   // The session-name may have been merged with an existing one in the config
   // so pull it out of the parsed and updated config.
   // TODO: Has to be cleaner way to do this.
