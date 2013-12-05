@@ -746,7 +746,7 @@ function drake_ci_behat_update_config($config_parsed, $context, $webserver_port)
   $behat_extension_path = dirname(__FILE__) . '/../behat_extensions/log_videourl.php';
 
   // Prepare the configurations we want to inject.
-  // TODO: NUKE this and update the behat config instead.
+  // Build up a base_url to use when modifying the configuration.
   $base_url = 'http://';
 
   if (!empty($context['external-site-host'])) {
@@ -772,7 +772,6 @@ function drake_ci_behat_update_config($config_parsed, $context, $webserver_port)
   else {
     // Extract capabillities dynamically.
     // Generate name if not specified.
-    $caps = array();
     if (empty($context['selenium-cap-name'])) {
       $context['selenium-cap-name'] = $context['drupal-multisite-host'] . '-' . $context['profile'] . '-' . date("YmdHis");
     }
