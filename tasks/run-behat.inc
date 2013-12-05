@@ -325,37 +325,6 @@ function drake_ci_behat_test($context) {
     2 => array('file', $errout_logfile, 'w'),
   );
 
-  $mink_extension_params = array (
-    'base_url' => 'http://' . (!empty($context['test-host']) ? $context['test-host'] : $context['site-host']) . ':' . (!empty($context['test-port']) ? $context['test-port'] : $port),
-  );
-
-  if (!empty($context['selenium-wd-host'])) {
-    $mink_extension_params['selenium2']['wd_host'] = $context['selenium-wd-host'];
-  }
-
-  if (!empty($context['capabilities'])) {
-    $mink_extension_params['selenium2']['capabilities'] = $context['capabilities'];
-  }
-  else {
-    // Extract capabillities dynamically.
-    // Generate name if not specified.
-    $caps = array();
-    if (empty($context['selenium-cap-name'])) {
-      // TODO: use timestamp instead.
-      $context['selenium-cap-name'] = $context['site-host'] . '-' . $context['profile'] . '-' . date("YmdHis");
-    }
-    foreach ($context as $key => $value) {
-      if (strpos($key, SELENIUM_CAP_PREFIX) === 0 && !empty($value)) {
-        $caps[] = "'" . substr($key, strlen(SELENIUM_CAP_PREFIX)) . "':'" . $value . "'";
-      }
-    }
-
-    // Wrap in brances seperate by comma.
-    if (count($caps) > 0) {
-      $mink_extension_params['selenium2']['capabilities'] = '{' . implode(',', $caps) . '}';
-    }
-  }
-
   $behat_config = $context['behat-config'];
 
   // Create runtime behat-configuration with the video-url logger extension
@@ -404,10 +373,25 @@ function drake_ci_behat_test($context) {
   // TODO: Has to be cleaner way to do this.
   $session_name = $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['capabilities']['name'];
 
+  // Hack for now - behat has a problem with capabilities with dashes, so to fix
+  // this we use an environment-variable to specify them as it circumvent the
+  // faulty code.
+  // The function rewrites the runtime config and strips out the capabillites
+  // for the specified profile.
+  $behat_proc_env = drake_ci_behat_dump_config_to_env($context, $behat_profile, $behat_runtime_config);
+
+  // Prepare a string-version for debugging.
+  $behat_proc_env_pretty = array();
+  foreach ($behat_proc_env as $key => $value) {
+    $behat_proc_env_pretty[] = $key . '=' . $value;
+  }
+  $behat_proc_env_pretty = implode(':', $behat_proc_env_pretty);
+
+  // Execute behat.
   $cmd = 'behat -v -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
-  drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir', array('%dir' => $behat_dir)), 'debug');
+  drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir with environment %env', array('%dir' => $behat_dir, '%env' => $behat_proc_env_pretty)), 'debug');
   drush_log(dt('Starting behat session named %session', array('%session' => $session_name)), 'ok');
-  $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir);
+  $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir, $behat_proc_env);
   register_shutdown_function('_drake_ci_kill_process_shutdown', $behat_process);
 
   $max_executiontime = $context['max-executiontime'];
@@ -485,6 +469,54 @@ EOT;
     drush_log('Test completed successfully', 'success');
     return TRUE;
   }
+}
+
+/**
+ * Remove the specified profile from the behat-configuration and return an
+ * environment-variable that should be used instead.
+ * @param $context
+ * @param $mink_extension_params
+ * @return mixed
+ */
+function drake_ci_behat_dump_config_to_env($context, $profile, $config_path) {
+  $yaml = new Parser();
+  $config_parsed = $yaml->parse(file_get_contents($config_path));
+
+  if (empty($config_parsed[$profile])) {
+    // The profile does not exist in the behat configuration.
+    return array();
+  }
+
+  // Get the selenium2 configuration for the profile from the configuration.
+  $mink_extension_params['selenium2'] = $config_parsed[$profile]['extensions']['Behat\MinkExtension\Extension']['selenium2'];
+
+  // The entire selenium2 section has to be blanked out, and replaced with a
+  // null capability in order not to clash with some internal mink-config
+  // parsing wirdness.
+  $config_parsed[$profile]['extensions']['Behat\MinkExtension\Extension']['selen  ium2'] = array('capabilities' => NULL);
+
+  // Update the behat-configuration - the mink-extension uses values from the
+  // environment-variabel as defaults, so we need to make sure that there are
+  // nothing left to mess with the env values.
+  $dumper = new Dumper();
+  $dumper->setIndentation(2);
+  $yaml = $dumper->dump($config_parsed, 5);
+  file_put_contents($config_path, $yaml);
+
+  // Get any capabilities specified on the commandline, they will override
+  // anything in the behat-config.
+  foreach ($context as $key => $value) {
+    if (strpos($key, SELENIUM_CAP_PREFIX) === 0 && !empty($value)) {
+      $mink_extension_params['selenium2']['capabilities'][substr($key, strlen(SELENIUM_CAP_PREFIX))] = $value;
+    }
+  }
+
+  // Dump the entire configuration into a string for the environment.
+  // Base on current environment if any.
+  $behat_proc_env = empty($_ENV) ? array() : $_ENV;
+  $behat_proc_env['MINK_EXTENSION_PARAMS'] = http_build_query($mink_extension_params);
+
+  return $behat_proc_env;
 }
 
 /**
