@@ -378,7 +378,7 @@ function drake_ci_behat_test($context) {
   // faulty code.
   // The function rewrites the runtime config and strips out the capabillites
   // for the specified profile.
-  $behat_proc_env = drake_ci_behat_dump_config_to_env($context, $behat_profile, $behat_runtime_config);
+  $behat_proc_env = drake_ci_behat_dump_config_to_env($behat_profile, $behat_runtime_config);
 
   // Prepare a string-version for debugging.
   $behat_proc_env_pretty = array();
@@ -480,7 +480,7 @@ EOT;
  * @param $mink_extension_params
  * @return mixed
  */
-function drake_ci_behat_dump_config_to_env($context, $profile, $config_path) {
+function drake_ci_behat_dump_config_to_env($profile, $config_path) {
   $yaml = new Parser();
   $config_parsed = $yaml->parse(file_get_contents($config_path));
 
@@ -504,14 +504,6 @@ function drake_ci_behat_dump_config_to_env($context, $profile, $config_path) {
   $dumper->setIndentation(2);
   $yaml = $dumper->dump($config_parsed, 5);
   file_put_contents($config_path, $yaml);
-
-  // Get any capabilities specified on the commandline, they will override
-  // anything in the behat-config.
-  foreach ($context as $key => $value) {
-    if (strpos($key, SELENIUM_CAP_PREFIX) === 0 && !empty($value)) {
-      $mink_extension_params['selenium2']['capabilities'][substr($key, strlen(SELENIUM_CAP_PREFIX))] = $value;
-    }
-  }
 
   // Dump the entire configuration into a string for the environment.
   // Base on current environment if any.
