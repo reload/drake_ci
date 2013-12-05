@@ -307,7 +307,8 @@ function drake_ci_behat_test($context) {
     }
   }
 
-  if (!drake_ci_behat_start_webserver($site_local_uri, $port, $context)) {
+  $log_file = '/tmp/behat-webserver' . $port . '-' . posix_getpid() . '.log';
+  if (!drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $context)) {
     return FALSE;
   }
 
@@ -492,11 +493,10 @@ EOT;
  * @param $context
  * @return bool
  */
-function drake_ci_behat_start_webserver($site_local_uri, $port, $context) {
+function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $context) {
 // Get a webserver up and running.
 
   // Use a temporary log file, to avoid buffers being filled.
-  $log_file = '/tmp/behat-webserver' . $port . '-' . posix_getpid() . '.log';
   drush_register_file_for_deletion($log_file);
   $descriptorspec = array(
     0 => array('file', '/dev/null', 'r'),
