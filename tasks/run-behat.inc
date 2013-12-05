@@ -792,6 +792,11 @@ function drake_ci_behat_update_config($config_parsed, $context, $webserver_port)
       continue;
     }
 
+    // Use auto-generated base_url.
+    // TODO: If we want to support tests without the internal webserver this
+    // might have to be wrapped in a conditional.
+    $config_parsed[$profile_name]['extensions']['Behat\MinkExtension\Extension']['base_url'] = $base_url;
+
     // Add the video-logger extension.
     $config_parsed[$profile_name]['extensions'][$behat_extension_path] = NULL;
 
