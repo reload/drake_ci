@@ -346,22 +346,9 @@ function drake_ci_behat_test($context) {
       )
     );
   }
-  $behat_runtime_config = tempnam(sys_get_temp_dir(), 'behat-');
   $config_parsed = drake_ci_behat_update_config($config_parsed, $context, $port);
 
-  $dumper = new Dumper();
-  $dumper->setIndentation(2);
-  $yaml = $dumper->dump($config_parsed, 5);
-  file_put_contents($behat_runtime_config, $yaml);
-  drush_log("Dumping updated behat-configuration to  " . $behat_runtime_config, 'debug');
-
-  // Make sure we delete the temp-file after execution.
-  register_shutdown_function(function() use ($behat_runtime_config){
-    unlink($behat_runtime_config);
-  });
-
   $behat_features = $context['behat-features'];
-
   // The HTML and Junit formatter needs a file and dir respectivly.
   $out_html = $output_dir . '/behat-result.html';
   $out_junit = $output_dir;
@@ -386,6 +373,9 @@ function drake_ci_behat_test($context) {
     $behat_proc_env_pretty[] = $key . '=' . $value;
   }
   $behat_proc_env_pretty = implode(':', $behat_proc_env_pretty);
+
+  // Write out the configuration to use for this run.
+  $behat_runtime_config = drake_ci_behat_write_config($config_parsed);
 
   // Execute behat.
   $cmd = 'behat -v -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
@@ -471,6 +461,25 @@ EOT;
     drush_log('Test completed successfully', 'success');
     return TRUE;
   }
+}
+
+/**
+ * @param $config_parsed
+ * @return string
+ */
+function drake_ci_behat_write_config($config_parsed) {
+  $behat_runtime_config = tempnam(sys_get_temp_dir(), 'behat-');
+  $dumper = new Dumper();
+  $dumper->setIndentation(2);
+  $yaml = $dumper->dump($config_parsed, 5);
+  file_put_contents($behat_runtime_config, $yaml);
+  drush_log("Dumping updated behat-configuration to  " . $behat_runtime_config, 'debug');
+
+  // Make sure we delete the temp-file after execution.
+  register_shutdown_function(function () use ($behat_runtime_config) {
+    //unlink($behat_runtime_config);
+  });
+  return $behat_runtime_config;
 }
 
 /**
