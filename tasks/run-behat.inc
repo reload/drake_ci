@@ -495,7 +495,7 @@ function drake_ci_behat_dump_config_to_env($profile, $config_path) {
   // The entire selenium2 section has to be blanked out, and replaced with a
   // null capability in order not to clash with some internal mink-config
   // parsing wirdness.
-  $config_parsed[$profile]['extensions']['Behat\MinkExtension\Extension']['selen  ium2'] = array('capabilities' => NULL);
+  $config_parsed[$profile]['extensions']['Behat\MinkExtension\Extension']['selenium2'] = array('capabilities' => NULL);
 
   // Update the behat-configuration - the mink-extension uses values from the
   // environment-variabel as defaults, so we need to make sure that there are
