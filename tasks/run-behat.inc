@@ -400,7 +400,9 @@ function drake_ci_behat_test($context) {
   // Wait a sec.
   sleep(1);
   // Then get the process status.
-  $proc_status = proc_get_status($behat_process);
+  if ($behat_process) {
+    $proc_status = proc_get_status($behat_process);
+  }
   $force_exit = FALSE;
   if ($behat_process && $proc_status['running']) {
     // Wait for the process to stop.
