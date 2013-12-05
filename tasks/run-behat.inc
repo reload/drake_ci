@@ -368,7 +368,7 @@ function drake_ci_behat_test($context) {
   // faulty code.
   // The function rewrites the runtime config and strips out the capabillites
   // for the specified profile.
-  $behat_proc_env = drake_ci_behat_dump_config_to_env($behat_profile, $behat_runtime_config);
+  list($behat_proc_env, $config_parsed) = drake_ci_behat_dump_config_to_env($behat_profile, $config_parsed, $behat_runtime_config);
 
   // Prepare a string-version for debugging.
   $behat_proc_env_pretty = array();
@@ -492,13 +492,10 @@ function drake_ci_behat_write_config($config_parsed) {
  * @param $mink_extension_params
  * @return mixed
  */
-function drake_ci_behat_dump_config_to_env($profile, $config_path) {
-  $yaml = new Parser();
-  $config_parsed = $yaml->parse(file_get_contents($config_path));
-
+function drake_ci_behat_dump_config_to_env($profile, $config_parsed, $config_path) {
   if (empty($config_parsed[$profile])) {
     // The profile does not exist in the behat configuration.
-    return array();
+    return array(array(), $config_parsed);
   }
 
   // Get the selenium2 configuration for the profile from the configuration.
@@ -522,7 +519,7 @@ function drake_ci_behat_dump_config_to_env($profile, $config_path) {
   $behat_proc_env = empty($_ENV) ? array() : $_ENV;
   $behat_proc_env['MINK_EXTENSION_PARAMS'] = http_build_query($mink_extension_params);
 
-  return $behat_proc_env;
+  return array($behat_proc_env, $config_parsed);
 }
 
 /**
