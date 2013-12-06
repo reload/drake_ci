@@ -319,7 +319,6 @@ function drake_ci_behat_test($context) {
 
   // TODO: Run multiple behat instances - in sequence to begin with - then maybe
   // in parallel.
-
   // Use a temporary log file, to avoid buffers being filled.
   $stdout_logfile = $output_dir . '/behat-saucelabs-' . $port . '-' . posix_getpid() . '.log';
   $errout_logfile = $output_dir . '/behat-saucelabs-error-' . $port . '-' . posix_getpid() . '.log';
@@ -335,7 +334,7 @@ function drake_ci_behat_test($context) {
   // Create runtime behat-configuration with the video-url logger extension
   // injected.
   $behat_config_full = $behat_dir . '/' . $behat_config;
-  if (!file_exists($behat_config_full) ) {
+  if (!file_exists($behat_config_full)) {
     return drake_action_error(dt('Could not update find the behat-config %file.', array('%file' => $behat_config_full)));
   }
   $yaml = new Parser();
@@ -388,7 +387,7 @@ function drake_ci_behat_test($context) {
   // faulty code.
   // The function rewrites the runtime config and strips out the capabillites
   // for the specified profile.
-  list($behat_proc_env, $config_parsed) = drake_ci_behat_dump_config_to_env($behat_profile, $config_parsed, $behat_runtime_config);
+  list($behat_proc_env, $config_parsed) = drake_ci_behat_dump_config_to_env($behat_profile, $config_parsed);
 
   // Prepare a string-version for debugging.
   $behat_proc_env_pretty = array();
@@ -516,7 +515,7 @@ function drake_ci_behat_write_config($config_parsed) {
  * @param $mink_extension_params
  * @return mixed
  */
-function drake_ci_behat_dump_config_to_env($profile, $config_parsed, $config_path) {
+function drake_ci_behat_dump_config_to_env($profile, $config_parsed) {
   if (empty($config_parsed[$profile])) {
     // The profile does not exist in the behat configuration.
     return array(array(), $config_parsed);
@@ -529,14 +528,6 @@ function drake_ci_behat_dump_config_to_env($profile, $config_parsed, $config_pat
   // null capability in order not to clash with some internal mink-config
   // parsing wirdness.
   $config_parsed[$profile]['extensions']['Behat\MinkExtension\Extension']['selenium2'] = array('capabilities' => NULL);
-
-  // Update the behat-configuration - the mink-extension uses values from the
-  // environment-variabel as defaults, so we need to make sure that there are
-  // nothing left to mess with the env values.
-  $dumper = new Dumper();
-  $dumper->setIndentation(2);
-  $yaml = $dumper->dump($config_parsed, 5);
-  file_put_contents($config_path, $yaml);
 
   // Dump the entire configuration into a string for the environment.
   // Base on current environment if any.
@@ -926,4 +917,3 @@ function _drake_ci_drop_db_shutdown($db_spec) {
     drush_log(dt('Could not drop database, unsupported driver "%driver"', array('%driver' => $db_spec['driver'])));
   }
 }
-
