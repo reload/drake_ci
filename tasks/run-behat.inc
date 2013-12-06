@@ -312,7 +312,7 @@ function drake_ci_behat_test($context) {
     }
   }
 
-  $log_file = '/tmp/behat-webserver' . $port . '-' . posix_getpid() . '.log';
+  $log_file = $output_dir . '/behat-webserver' . $port . '-' . posix_getpid() . '.log';
   if (!drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $context)) {
     return FALSE;
   }
@@ -372,7 +372,9 @@ function drake_ci_behat_test($context) {
   // Prepare for phantomjs if nessecary.
   if (!empty($config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'])
     && $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'] == 'phantomjs') {
-    $wd_url = drake_ci_behat_start_phantomjs($context['phantomjs-path']);
+    $log_file = $output_dir . '/behat-phantomjs' . $port . '-' . posix_getpid() . '.log';
+
+    $wd_url = drake_ci_behat_start_phantomjs($log_file, $context['phantomjs-path']);
     if (!$wd_url) {
       return FALSE;
     }
@@ -588,13 +590,11 @@ function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $cont
 }
 
 
-function drake_ci_behat_start_phantomjs($executable_path = NULL) {
+function drake_ci_behat_start_phantomjs($log_file, $executable_path = NULL) {
   if (empty($executable_path)) {
     $executable_path = 'phantomjs';
   }
   $port = mt_rand(40000, 50000);;
-
-  $log_file = '/tmp/behat-phantomjs' . $port . '-' . posix_getpid() . '.log';
   // Use a temporary log file, to avoid buffers being filled.
   drush_register_file_for_deletion();
   $descriptorspec = array(
