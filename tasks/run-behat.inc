@@ -667,6 +667,14 @@ function drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options
     )));
   }
 
+  // Run updb to bring in any changes since the database where dumped.
+  drush_log('Running update-db', 'ok');
+  $args = $drush_invoke_options;
+  $args[] = "-y";
+  $res = drush_invoke_process(NULL, 'updatedb', array(), $args, TRUE);
+  if (!$res || $res['error_status'] != 0) {
+    return drake_action_error(dt('Error running updatedb.'));
+  }
   // Clear cache as the imported database might contains some paths that needs
   // updating.
   drush_log('Flushing site-cache after database-import', 'ok');
