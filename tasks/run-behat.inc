@@ -524,6 +524,24 @@ function drake_ci_behat_dump_config_to_env($profile, $config_parsed) {
   // Get the selenium2 configuration for the profile from the configuration.
   $mink_extension_params['selenium2'] = $config_parsed[$profile]['extensions']['Behat\MinkExtension\Extension']['selenium2'];
 
+  // Normally things in the default profile will be overriden by settings in
+  // the specific profile behat is running with. ENV settings on the other hand
+  // only acts as a default if nothing else is set, in other words settings in
+  // the default profile will override ENV settings.
+  // To get around this we remove anything from the default profile that might
+  // clash.
+  foreach ($mink_extension_params['selenium2'] as $key => $value) {
+    if (!empty($config_parsed['default']['extensions']['Behat\MinkExtension\Extension']['selenium2'][$key])) {
+      unset($config_parsed['default']['extensions']['Behat\MinkExtension\Extension']['selenium2'][$key]);
+    }
+
+    // If nothing is left in the default profile under selenium2, remove the key
+    // completely.
+    if (empty($config_parsed['default']['extensions']['Behat\MinkExtension\Extension']['selenium2'])) {
+      unset($config_parsed['default']['extensions']['Behat\MinkExtension\Extension']['selenium2']);
+    }
+  }
+
   // The entire selenium2 section has to be blanked out, and replaced with a
   // null capability in order not to clash with some internal mink-config
   // parsing wirdness.
