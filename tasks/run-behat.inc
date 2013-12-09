@@ -24,6 +24,7 @@ $tasks['ci-run-behat'] = array(
   'behat-features' => context_optional('behat-features'),
   'behat-config' => context_optional('behat-config'),
   'behat-dir' => context_optional('behat-dir'),
+  'behat-strict' => context_optional('behat-strict'),
   'no-generate-sites-php' => context_optional('no-generate-sites-php'),
 );
 
@@ -63,6 +64,10 @@ $actions['run-behat'] = array(
     'behat-dir' => array(
       'description' => 'Behat directory relative to the drupal root, defaults to "sites/all/tests/behat" or "profiles/<profile>/tests/behat" if profile is specified',
       'default' => NULL,
+    ),
+    'behat-strict' => array(
+      'description' => 'Whether to run behat in strict mode - defaults to TRUE',
+      'default' => TRUE,
     ),
     'behat-profile' => array(
       'description' => 'Behat test-profile to use, "default" if unspecified.',
@@ -399,8 +404,9 @@ function drake_ci_behat_test($context) {
   // Write out the configuration to use for this run.
   $behat_runtime_config = drake_ci_behat_write_config($config_parsed);
 
+  $run_strict = $context['behat-strict'] ? '--strict' : '';
   // Execute behat.
-  $cmd = 'behat -v -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
+  $cmd = 'behat -v ' . $run_strict . ' -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
   drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir with environment %env', array('%dir' => $behat_dir, '%env' => $behat_proc_env_pretty)), 'debug');
   drush_log(dt('Starting behat session named %session', array('%session' => $session_name)), 'ok');
   $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir, $behat_proc_env);
