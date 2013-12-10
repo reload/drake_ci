@@ -402,7 +402,7 @@ function drake_ci_behat_test($context) {
   $behat_proc_env_pretty = implode(':', $behat_proc_env_pretty);
 
   // Write out the configuration to use for this run.
-  $behat_runtime_config = drake_ci_behat_write_config($config_parsed);
+  $behat_runtime_config = drake_ci_behat_write_config($config_parsed, $behat_dir);
 
   $run_strict = $context['behat-strict'] ? '--strict' : '';
   // Execute behat.
@@ -499,8 +499,12 @@ EOT;
  * @param $config_parsed
  * @return string
  */
-function drake_ci_behat_write_config($config_parsed) {
-  $behat_runtime_config = tempnam(sys_get_temp_dir(), 'behat-');
+function drake_ci_behat_write_config($config_parsed, $destination_dir = NULL) {
+  if (empty($destination_dir)) {
+    $destination_dir = sys_get_temp_dir();
+  }
+  
+  $behat_runtime_config = tempnam($destination_dir, 'behat-');
   $dumper = new Dumper();
   $dumper->setIndentation(2);
   $yaml = $dumper->dump($config_parsed, 5);
