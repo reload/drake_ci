@@ -212,6 +212,7 @@ require_once dirname(__FILE__) . '/tasks/run-simpletests.inc';
 require_once dirname(__FILE__) . '/tasks/package-zip.inc';
 
 require_once dirname(__FILE__) . '/tasks/run-behat.inc';
+require_once dirname(__FILE__) . '/tasks/baseline.inc';
 
 /*
  * Clean up output directory, if specified.
