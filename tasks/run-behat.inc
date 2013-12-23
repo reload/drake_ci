@@ -317,7 +317,7 @@ function drake_ci_behat_test($context) {
     }
   }
 
-  $log_file = $output_dir . '/behat-webserver' . $port . '-' . posix_getpid() . '.log';
+  $log_file = $output_dir . '/behat-webserver-' . $port . '-' . posix_getpid() . '.log';
   if (!drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $context)) {
     return FALSE;
   }
@@ -325,8 +325,8 @@ function drake_ci_behat_test($context) {
   // TODO: Run multiple behat instances - in sequence to begin with - then maybe
   // in parallel.
   // Use a temporary log file, to avoid buffers being filled.
-  $stdout_logfile = $output_dir . '/behat-saucelabs-' . $port . '-' . posix_getpid() . '.log';
-  $errout_logfile = $output_dir . '/behat-saucelabs-error-' . $port . '-' . posix_getpid() . '.log';
+  $stdout_logfile = $output_dir . '/behat-' . $port . '-' . posix_getpid() . '.log';
+  $errout_logfile = $output_dir . '/behat-error-' . $port . '-' . posix_getpid() . '.log';
   drush_register_file_for_deletion($log_file);
   $descriptorspec = array(
     0 => array('file', '/dev/null', 'r'),
@@ -373,12 +373,13 @@ function drake_ci_behat_test($context) {
   // TODO: Has to be cleaner way to do this.
   $session_name = $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['capabilities']['name'];
 
-  // Prepare for phantomjs if nessecary.
+  // Prepare for phantomjs by starting up a process if nessecary.
   if (!empty($config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'])
     && $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'] == 'phantomjs') {
-    $log_file = $output_dir . '/behat-phantomjs' . $port . '-' . posix_getpid() . '.log';
+    $process_log_file = $output_dir . '/behat-phantomjs-' . $port . '-' . posix_getpid() . '.log';
+    $wd_log_file = $output_dir . '/behat-phantomjs-wd-' . $port . '-' . posix_getpid() . '.log';
 
-    $wd_url = drake_ci_behat_start_phantomjs($log_file, $context['phantomjs-path']);
+    $wd_url = drake_ci_behat_start_phantomjs($process_log_file, $wd_log_file, $context['phantomjs-path']);
     if (!$wd_url) {
       return FALSE;
     }
@@ -609,11 +610,11 @@ function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $cont
 }
 
 
-function drake_ci_behat_start_phantomjs($log_file, $executable_path = NULL) {
+function drake_ci_behat_start_phantomjs($log_file, $wd_log_file, $executable_path = NULL) {
   if (empty($executable_path)) {
     $executable_path = 'phantomjs';
   }
-  $port = mt_rand(40000, 50000);;
+  $port = mt_rand(40000, 50000);
   // Use a temporary log file, to avoid buffers being filled.
   drush_register_file_for_deletion();
   $descriptorspec = array(
@@ -624,8 +625,8 @@ function drake_ci_behat_start_phantomjs($log_file, $executable_path = NULL) {
 
   // We'd like to use drush runserver instead, but in initial testing runserver
   // would cause core tests to fail on login, while this would not.
-
-  $cmd = $executable_path . ' --webdriver=' . $port;
+  // Phantomjs curiosity, it plain refuses to create a logfile with dashes.
+  $cmd = $executable_path . ' --webdriver=' . $port . ' --webdriver-logfile=' . escapeshellarg(strtr($wd_log_file, '-', '_')) . ' --webdriver-loglevel=DEBUG';
   drush_log("Executing command " . $cmd, 'debug');
   $phantom_process = proc_open($cmd, $descriptorspec, $pipes);
   register_shutdown_function('_drake_ci_kill_process_shutdown', $phantom_process);
