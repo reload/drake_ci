@@ -415,10 +415,15 @@ function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $beh
   // TODO: Has to be cleaner way to do this.
   $session_name = $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['capabilities']['name'];
 
+  // Webdriver provider.
+  // TODO: this should be a bit more global thing, other parts of the task could
+  // possible be simplified by knowing this.
+  $wd_provider = 'sauce';
   // Prepare for phantomjs by starting up a process if nessecary.
   if (!empty($config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'])
     && $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'] == 'phantomjs'
   ) {
+    $wd_provider = 'phantomjs';
     $process_log_file = $output_dir . '/behat-phantomjs-' . $port . '-' . posix_getpid() . '.log';
     $wd_log_file = $output_dir . '/behat-phantomjs-wd-' . $port . '-' . posix_getpid() . '.log';
 
@@ -498,33 +503,34 @@ function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $beh
       $force_exit = time() > ($start + ($max_executiontime));
     } while ($proc_status['running'] && $proc_status['pid'] && !$force_exit);
 
-    // Scan the output logfile for video-links, also dump to log.
-    // TODO: we only do this to get the progress, would be nicer to just allow
-    // it to go to stdout directly.
-    $stdout_content = file($stdout_logfile);
-    $matches = array();
-    foreach ($stdout_content as $line) {
-      if (preg_match('#saucelabs.com/jobs#', $line)) {
-        $matches[] = $line;
+    if ($wd_provider == 'sauce') {
+      // Scan the output logfile for video-links, also dump to log.
+      // TODO: we only do this to get the progress, would be nicer to just allow
+      // it to go to stdout directly.
+      $stdout_content = file($stdout_logfile);
+      $matches = array();
+      foreach ($stdout_content as $line) {
+        if (preg_match('#saucelabs.com/jobs#', $line)) {
+          $matches[] = $line;
+        }
+        else {
+          drush_log(rtrim($line), 'success');
+        }
       }
-      else {
-        drush_log(rtrim($line), 'success');
-      }
-    }
 
-    $matches_markup = '';
-    if (!empty($matches)) {
-      // Log the video-url via drush, and generate a html-report.
-      // TODO: Inject the URL into the behat html-report instead.
-      drush_log("Video URL:", 'success');
-      $matches = array_unique($matches);
       $matches_markup = '';
-      foreach ($matches as $match) {
-        drush_log($match, 'success');
-        $matches_markup .= "<li><a href=\"$match\">$match</a>\n";
+      if (!empty($matches)) {
+        // Log the video-url via drush, and generate a html-report.
+        // TODO: Inject the URL into the behat html-report instead.
+        drush_log("Video URL:", 'success');
+        $matches = array_unique($matches);
+        $matches_markup = '';
+        foreach ($matches as $match) {
+          drush_log($match, 'success');
+          $matches_markup .= "<li><a href=\"$match\">$match</a>\n";
+        }
       }
-    }
-    $report = <<<EOT
+      $report = <<<EOT
 <html><head></head><body>
 <h1>Saucelabs results</h1>
 <ul>
@@ -532,7 +538,8 @@ function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $beh
 </ul>
 </body></html>
 EOT;
-    file_put_contents($output_dir . '/video_url.html', $report);
+      file_put_contents($output_dir . '/video_url.html', $report);
+    }
   }
   else {
     if (!$behat_process) {
