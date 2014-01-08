@@ -8,6 +8,7 @@ $tasks['ci-run-behat'] = array(
   'action' => 'run-behat',
   'root' => context('[@self:site:root]'),
   'baseline-package' => context_optional('baseline-package'),
+  'baseline-type' => context_optional('baseline-type'),
   'db-su' => context('db-su'),
   'db-su-pw' => context_optional('db-su-pw'),
   'php' => context_optional('php'),
@@ -20,12 +21,13 @@ $tasks['ci-run-behat'] = array(
   'drupal-multisite-host' => context_optional('drupal-multisite-host'),
   'external-site-port' => context_optional('external-site-port'),
   'external-site-host' => context_optional('external-site-host'),
-  'output-dir' => context_optional('output-dir', context('[@self:site:root]/tests/behat')),
+  'output-dir' => context_optional('output-dir', context('[@self:site:root]/tests-output')),
   'behat-features' => context_optional('behat-features'),
   'behat-config' => context_optional('behat-config'),
   'behat-dir' => context_optional('behat-dir'),
   'behat-strict' => context_optional('behat-strict'),
   'no-generate-sites-php' => context_optional('no-generate-sites-php'),
+  'no-behat' => context_optional('no-behat'),
 );
 
 // See http://saucelabs.com/docs/additional-config#desired-capabilities
@@ -92,8 +94,12 @@ $actions['run-behat'] = array(
     ),
 
     'baseline-package' => array(
-      'description' => 'Baseline package - an aegir backup',
+      'description' => 'Baseline package - an aegir 1 backup or an archive-dump with a single site',
       'default' => NULL,
+    ),
+    'baseline-type' => array(
+      'description' => 'aegir or archive-dump (Default)',
+      'default' => 'archive-dump',
     ),
     'capabilities' => array(
       'description' => 'Remote Webdriver desired capabilities, see http://saucelabs.com/docs/additional-config#desired-capabilities if set this value will override any ' . SELENIUM_CAP_PREFIX . "-* parameters",
@@ -129,6 +135,10 @@ $actions['run-behat'] = array(
     ),
     'no-generate-sites-php' => array(
       'description' => 'Do not generate a sites.php if drupal-multisite-host and external-site-host differs',
+      'default' => FALSE,
+    ),
+    'no-behat' => array(
+      'description' => 'Just get the site up and running, but dont start behat, instead wait for the user to request shutdown.',
       'default' => FALSE,
     ),
   ),
@@ -242,16 +252,23 @@ function drake_ci_behat_test($context) {
     }
     else {
       // Generate a new sites.php while preserving any existing.
-      if(!drake_ci_behat_generate_sitesphp($site_dir, $context)){
+      if (!drake_ci_behat_generate_sitesphp($site_dir, $context)) {
         return FALSE;
       }
     }
   }
 
   if (file_exists($context['baseline-package'])) {
-    // Unpack the baseline package into the specified target site-path.
-    if (!drake_ci_behat_extract_baseline($site_dir, $target_site_path, $context)) {
-      return FALSE;
+    if ($context['baseline-type'] == 'aegir') {
+      // Unpack the baseline package into the specified target site-path.
+      if (!drake_ci_behat_extract_aegir_baseline($site_dir, $target_site_path, $context)) {
+        return FALSE;
+      }
+    } else {
+      // Archive Dump.
+      if (!drake_ci_behat_extract_arb_baseline($site_dir, $target_site_path, $context)) {
+        return FALSE;
+      }
     }
   }
 
@@ -305,9 +322,11 @@ function drake_ci_behat_test($context) {
   $sqldump_path = $target_site_path . '/database.sql';
   $drush_invoke_options['root'] = $context['root'];
   $drush_invoke_options['uri'] = $site_local_uri;
+  $db_url = $db_spec['driver'] . '://' . $db_spec['username'] . ':' . $db_spec['password'] . '@' . $db_spec['host'] . '/' . $db_spec['database'];
+  $drush_invoke_options['db-url'] = $db_url;
 
   if (file_exists($sqldump_path)) {
-    if (!drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options)) {
+    if (!drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options, $target_site_path)) {
       return FALSE;
     }
   }
@@ -318,7 +337,7 @@ function drake_ci_behat_test($context) {
   }
 
   $log_file = $output_dir . '/behat-webserver-' . $port . '-' . posix_getpid() . '.log';
-  if (!drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $context)) {
+  if (!drake_ci_behat_start_webserver($context['drupal-multisite-host'], $port, $log_file, $context)) {
     return FALSE;
   }
 
@@ -334,6 +353,35 @@ function drake_ci_behat_test($context) {
     2 => array('file', $errout_logfile, 'w'),
   );
 
+  if (!$context['no-behat']) {
+    return drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $behat_profiles, $descriptorspec, $stdout_logfile, $errout_logfile);
+  }
+  else {
+    // Crude hack as we are executing in the background and thus cannot prompt
+    // for keyboard input.
+    // TODO: This is not a viable solution as the shutdown functions won't get
+    // called and all the temp. stuff from the test keeps lying around.
+    drush_log(dt('Press CTRL+c to exit', array(), 'OK'));
+    while (TRUE) {
+      sleep(1000);
+    }
+    // For codestyle - we'll never get here.
+    return TRUE;
+  }
+}
+
+/**
+ * @param $context
+ * @param $behat_dir
+ * @param $port
+ * @param $output_dir
+ * @param $behat_profiles
+ * @param $descriptorspec
+ * @param $stdout_logfile
+ * @param $errout_logfile
+ * @return bool
+ */
+function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $behat_profiles, $descriptorspec, $stdout_logfile, $errout_logfile) {
   $behat_config = $context['behat-config'];
 
   // Create runtime behat-configuration with the video-url logger extension
@@ -349,7 +397,7 @@ function drake_ci_behat_test($context) {
     return drake_action_error(
       dt("Unable to parse the behat-configuration at : %file\n Error-message: %error",
         array(
-          '%file' => $behat_config_full,
+          '%file'  => $behat_config_full,
           '%error' => $e->getMessage(),
         )
       )
@@ -375,7 +423,8 @@ function drake_ci_behat_test($context) {
 
   // Prepare for phantomjs by starting up a process if nessecary.
   if (!empty($config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'])
-    && $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'] == 'phantomjs') {
+    && $config_parsed[$behat_profile]['extensions']['Behat\MinkExtension\Extension']['selenium2']['browser'] == 'phantomjs'
+  ) {
     $process_log_file = $output_dir . '/behat-phantomjs-' . $port . '-' . posix_getpid() . '.log';
     $wd_log_file = $output_dir . '/behat-phantomjs-wd-' . $port . '-' . posix_getpid() . '.log';
 
@@ -408,7 +457,10 @@ function drake_ci_behat_test($context) {
   $run_strict = $context['behat-strict'] ? '--strict' : '';
   // Execute behat.
   $cmd = 'behat -v ' . $run_strict . ' -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
-  drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir with environment %env', array('%dir' => $behat_dir, '%env' => $behat_proc_env_pretty)), 'debug');
+  drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir with environment %env', array(
+    '%dir' => $behat_dir,
+    '%env' => $behat_proc_env_pretty
+  )), 'debug');
   drush_log(dt('Starting behat session named %session', array('%session' => $session_name)), 'ok');
   $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir, $behat_proc_env);
   register_shutdown_function('_drake_ci_kill_process_shutdown', $behat_process);
@@ -432,7 +484,7 @@ function drake_ci_behat_test($context) {
       $proc_status = proc_get_status($behat_process);
       // Halt if max execution-time has passed.
       $force_exit = time() > ($start + ($max_executiontime));
-    } while($proc_status['running'] && $proc_status['pid'] && !$force_exit);
+    } while ($proc_status['running'] && $proc_status['pid'] && !$force_exit);
 
     // Scan the output logfile for video-links, also dump to log.
     // TODO: we only do this to get the progress, would be nicer to just allow
@@ -479,7 +531,10 @@ EOT;
     return drake_action_error(dt('Gave up waiting for behat to complete, more than %max second passed.', array('%max' => $max_executiontime)));
   }
 
-  drush_log(dt('Behat execution completed in %sec seconds, output can be found in %outputdir', array('%sec' => (time() - $start), '%outputdir' => $output_dir)), 'ok');
+  drush_log(dt('Behat execution completed in %sec seconds, output can be found in %outputdir', array(
+    '%sec'       => (time() - $start),
+    '%outputdir' => $output_dir
+  )), 'ok');
   // Check status and finish up.
   if ($proc_status['exitcode'] !== 0) {
     drush_log("Behat error output", 'error');
@@ -514,7 +569,8 @@ function drake_ci_behat_write_config($config_parsed, $destination_dir = NULL) {
 
   // Make sure we delete the temp-file after execution.
   register_shutdown_function(function () use ($behat_runtime_config) {
-    //unlink($behat_runtime_config);
+    echo("Unlinking " . $behat_runtime_config . "\n");
+    unlink($behat_runtime_config);
   });
   return $behat_runtime_config;
 }
@@ -572,9 +628,8 @@ function drake_ci_behat_dump_config_to_env($profile, $config_parsed) {
  * @param $context
  * @return bool
  */
-function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $context) {
-// Get a webserver up and running.
-
+function drake_ci_behat_start_webserver($hostname, $port, $log_file, $context) {
+  // Get a webserver up and running.
   // Use a temporary log file, to avoid buffers being filled.
   drush_register_file_for_deletion($log_file);
   $descriptorspec = array(
@@ -583,11 +638,16 @@ function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $cont
     2 => array('file', $log_file, 'w'),
   );
 
+  // Go via ipv4 - different browers has a tendency to interpet "localhost"
+  // differently.
+  $listen_addr = $hostname == 'localhost' ? '127.0.0.1' : $hostname;
+
+  $listen_addr .= ':' . $port;
+  $cmd = $context['php'] . ' -t ' . $context['root'] . ' -S ' . $listen_addr . ' ' . escapeshellarg(dirname(dirname(__FILE__)) . '/router.php');
+  drush_log("Executing command " . $cmd, 'debug');
+
   // We'd like to use drush runserver instead, but in initial testing runserver
   // would cause core tests to fail on login, while this would not.
-
-  $cmd = $context['php'] . ' -t ' . $context['root'] . ' -S ' . $site_local_uri . ' ' . escapeshellarg(dirname(dirname(__FILE__)) . '/router.php');
-  drush_log("Executing command " . $cmd, 'debug');
   $php_process = proc_open($cmd, $descriptorspec, $pipes, $context['root']);
   register_shutdown_function('_drake_ci_kill_process_shutdown', $php_process);
 
@@ -599,11 +659,10 @@ function drake_ci_behat_start_webserver($site_local_uri, $port, $log_file, $cont
     return drake_action_error(dt('Could not start internal web server.'));
   }
 
-  drush_log(dt('Webserver running at http://%host:%port %proc',
+  drush_log(dt('Webserver running at http://%host:%port',
     array(
-      '%host' => $context['drupal-multisite-host'],
+      '%host' => $hostname,
       '%port' => $port,
-      '%proc' => $php_process,
     )
   ), 'ok');
   return TRUE;
@@ -660,8 +719,6 @@ function drake_ci_behat_start_phantomjs($log_file, $wd_log_file, $executable_pat
 function drake_ci_behat_site_install($profile, $db_spec, $site_dir, $drush_invoke_options) {
 // Site install.
   $args = array($profile);
-  $db_url = $db_spec['driver'] . '://' . $db_spec['username'] . ':' . $db_spec['password'] . '@' . $db_spec['host'] . '/' . $db_spec['database'];
-  $drush_invoke_options['db-url'] = $db_url;
   $drush_invoke_options['sites-subdir'] = $site_dir;
 
   drush_log(dt('Installing site %sitedir with profile %profile', array(
@@ -684,7 +741,7 @@ function drake_ci_behat_site_install($profile, $db_spec, $site_dir, $drush_invok
  * @param $drush_invoke_options
  * @return bool
  */
-function drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options) {
+function drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options, $target_site_path) {
 // Database-dump found.
   drush_log(dt('Importing database.sql into the database %dbname', array('%dbname' => $db_spec['database'])), 'ok');
   $success = _drush_sql_query(NULL, $db_spec, $sqldump_path);
@@ -700,7 +757,9 @@ function drake_ci_behat_import_db($sqldump_path, $db_spec, $drush_invoke_options
   drush_log('Running update-db', 'ok');
   $args = $drush_invoke_options;
   $args[] = "-y";
-  $res = drush_invoke_process(NULL, 'updatedb', array(), $args, TRUE);
+
+  $res = drush_invoke_process(NULL, 'updatedb', $args, $args, TRUE);
+
   if (!$res || $res['error_status'] != 0) {
     return drake_action_error(dt('Error running updatedb.'));
   }
@@ -760,7 +819,7 @@ function drake_ci_behat_setup_db($profile, $port, $context, $cleanup) {
  * @param $context
  * @return bool
  */
-function drake_ci_behat_extract_baseline($site_dir, $target_site_path, $context) {
+function drake_ci_behat_extract_aegir_baseline($site_dir, $target_site_path, $context) {
 // Cd to the site-directory to untar the baseline package.
   $oldcwd = getcwd();
   chdir($target_site_path);
@@ -794,6 +853,64 @@ function drake_ci_behat_extract_baseline($site_dir, $target_site_path, $context)
   else {
     return TRUE;
   }
+}
+
+/**
+ * @param $site_dir
+ * @param $target_site_path
+ * @param $context
+ * @return bool
+ */
+function drake_ci_behat_extract_arb_baseline($site_dir, $target_site_path, $context) {
+//  $oldcwd = getcwd();
+//  chdir($target_site_path);
+
+  // Large parts of the following comes from drush_archive_restore. It however
+  // does not support extracting a single site into a specific destination so
+  // I had to do some rewriting.
+  $tmp = drush_tempdir();
+  $file = $context['baseline-package'];
+  if (!$files = drush_tarball_extract($file, $tmp)) {
+    return drush_set_error('DRUSH_ARCHIVE_UNABLE_TO_EXTRACT', dt('Unable to extract site archive tarball to !tmp.', array('!tmp' => $tmp)));
+  }
+
+  $manifest = $tmp . '/MANIFEST.ini';
+  if (file_exists($manifest)) {
+    if (!$ini = parse_ini_file($manifest, TRUE)) {
+      return drush_set_error('DRUSH_ARCHIVE_UNABLE_TO_PARSE_MANIFEST', dt('Unable to parse MANIFEST.ini in the archive.'));
+    }
+  }
+  else {
+    $ini = drush_archive_guess_manifest($tmp);
+  }
+
+  // Global + a single site.
+  // TODO, named site.
+  if (count($ini) !== 2 && empty($context['archive-site-name'])) {
+    return drush_set_error('BASELINE_TO_MANY_SITES', dt('The baseline should only contain a single site!'));
+  }
+
+  // First element is global, nip it off.
+  $global = array_shift($ini);
+
+  // The rest is a list of sites, only one if archive-site-name i set.
+  $site = array_shift($ini);
+  $docroot = basename($site['docroot']);
+
+
+  // We now know where to find the extracted site (under $docroot).
+  $site_destination = $target_site_path;
+
+  if (!drush_move_dir("$tmp/$docroot/" . $site['sitedir'], $site_destination, TRUE)) {
+    return drush_set_error('DRUSH_ARCHIVE_UNABLE_TO_RESTORE_FILES', dt('Unable to restore site to !dest', array('!dest' => $site_destination)));
+  }
+
+  // Restore database.
+  $sql_file = $tmp . '/' . $site['database-default-file'];
+  // TODO, we should just import it instead of piggybagging on the agir code.
+  rename($sql_file, $site_destination . '/database.sql');
+
+    return TRUE;
 }
 
 /**
