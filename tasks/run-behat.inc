@@ -28,6 +28,7 @@ $tasks['ci-run-behat'] = array(
   'behat-strict' => context_optional('behat-strict'),
   'no-generate-sites-php' => context_optional('no-generate-sites-php'),
   'no-behat' => context_optional('no-behat'),
+  'no-behat-log' => context_optional('no-behat-log'),
 );
 
 // See http://saucelabs.com/docs/additional-config#desired-capabilities
@@ -139,6 +140,10 @@ $actions['run-behat'] = array(
     ),
     'no-behat' => array(
       'description' => 'Just get the site up and running, but dont start behat, instead wait for the user to request shutdown.',
+      'default' => FALSE,
+    ),
+    'no-log' => array(
+      'description' => 'Dump behat output to standard-out instead of a logfil',
       'default' => FALSE,
     ),
   ),
@@ -341,20 +346,9 @@ function drake_ci_behat_test($context) {
     return FALSE;
   }
 
-  // TODO: Run multiple behat instances - in sequence to begin with - then maybe
-  // in parallel.
-  // Use a temporary log file, to avoid buffers being filled.
-  $stdout_logfile = $output_dir . '/behat-' . $port . '-' . posix_getpid() . '.log';
-  $errout_logfile = $output_dir . '/behat-error-' . $port . '-' . posix_getpid() . '.log';
-  drush_register_file_for_deletion($log_file);
-  $descriptorspec = array(
-    0 => array('file', '/dev/null', 'r'),
-    1 => array('file', $stdout_logfile, 'w'),
-    2 => array('file', $errout_logfile, 'w'),
-  );
 
   if (!$context['no-behat']) {
-    return drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $behat_profiles, $descriptorspec, $stdout_logfile, $errout_logfile);
+    return drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $behat_profiles, $stdout_logfile, $errout_logfile);
   }
   else {
     // Crude hack as we are executing in the background and thus cannot prompt
@@ -381,7 +375,7 @@ function drake_ci_behat_test($context) {
  * @param $errout_logfile
  * @return bool
  */
-function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $behat_profiles, $descriptorspec, $stdout_logfile, $errout_logfile) {
+function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $behat_profiles) {
   $behat_config = $context['behat-config'];
 
   // Create runtime behat-configuration with the video-url logger extension
@@ -456,10 +450,28 @@ function drake_ci_behat_run_behat($context, $behat_dir, $port, $output_dir, $beh
 
   $run_strict = $context['behat-strict'] ? '--strict' : '';
   // Execute behat.
+  // TODO: Run multiple behat instances - in sequence to begin with - then maybe
+  // in parallel.
+  // Use a temporary log file, to avoid buffers being filled.
+  $stdout_logfile = $output_dir . '/behat-' . $port . '-' . posix_getpid() . '.log';
+  $errout_logfile = $output_dir . '/behat-error-' . $port . '-' . posix_getpid() . '.log';
+  drush_register_file_for_deletion($log_file);
+
+  if (empty($context['no-behat-log'])) {
+    $descriptorspec = array(
+      0 => array('file', '/dev/null', 'r'),
+      1 => array('file', $stdout_logfile, 'w'),
+      2 => array('file', $errout_logfile, 'w'),
+    );
+  }
+  else {
+    $descriptorspec = array();
+  }
+
   $cmd = 'behat -v ' . $run_strict . ' -p ' . escapeshellarg($behat_profile) . ' -c ' . escapeshellarg($behat_runtime_config) . ' -f pretty,junit,html --out ,' . escapeshellarg($out_junit) . ',' . escapeshellarg($out_html) . ' ' . escapeshellarg($behat_features);
   drush_log(dt('Running ' . $cmd . ' in behat-dir: %dir with environment %env', array(
     '%dir' => $behat_dir,
-    '%env' => $behat_proc_env_pretty
+    '%env' => $behat_proc_env_pretty,
   )), 'debug');
   drush_log(dt('Starting behat session named %session', array('%session' => $session_name)), 'ok');
   $behat_process = proc_open($cmd, $descriptorspec, $pipes, $behat_dir, $behat_proc_env);
