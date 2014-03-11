@@ -182,10 +182,23 @@ function drake_ci_run_simpletests($context) {
     // You'd think that using --pipe would be da shizzle, but it's just an
     // array represenation of the table printed, including headers, group
     // headers and formatting spaces.
-    foreach ($res['object']['_data'] as $row) {
-      $class_name = trim($row[0]);
-      if (isset($potential_tests[$class_name])) {
-        $tests[] = $class_name;
+    // To add insult to injury, different Drush/Drupal versions format the
+    // array differently.
+    if (isset($res['object']['_data'])) {
+      foreach ($res['object']['_data'] as $row) {
+        $class_name = trim($row[0]);
+        if (isset($potential_tests[$class_name])) {
+          $tests[] = $class_name;
+        }
+      }
+    }
+    else {
+      foreach ($res['object'] as $row) {
+        if (isset($row['class'])) {
+          if (isset($potential_tests[$row['class']])) {
+            $tests[] = $row['class'];
+          }
+        }
       }
     }
   }

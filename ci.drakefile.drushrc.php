@@ -86,6 +86,10 @@ $filesets['css'] = array(
   'include' => array('*.css'),
 );
 
+$filesets['git'] = array(
+  'include' => array('**/.git/**'),
+);
+
 /*
  * Convinience filesets.
  *
@@ -137,6 +141,13 @@ $filesets['all-custom'] = array(
  */
 $filesets['all'] = array(
   'dir' => context('root'),
+);
+
+$filesets['all-no-git'] = array(
+  'dir' => context('root'),
+  'extend' => array(
+    'no-git',
+  ),
 );
 
 /*
