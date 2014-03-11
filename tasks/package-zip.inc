@@ -10,7 +10,7 @@
  */
 $tasks['package-zip'] = array(
   'action' => 'package-zip',
-  'files' => fileset('all'),
+  'files' => fileset('all-no-git'),
   'output-dir' => context_optional('package-output-dir', context('[@self:site:root]')),
   'basename' => context_optional('package-basename', 'package'),
   'prefix' => context_optional('package-prefix', date('Y-m-d-His')),
