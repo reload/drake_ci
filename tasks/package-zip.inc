@@ -49,9 +49,12 @@ function drake_ci_package($context) {
   if (!is_writable($output)) {
     return drake_action_error(dt('Output dir @dir is not writable.', array('@dir' => $output)));
   }
-  // Add the prefix, basename and extension.
-  $output .= (empty($context['prefix']) ? '' : $context['prefix'] . '-');
-  $output .= $context['basename'];
+  // Add the (sanitized) prefix, basename and extension.
+  $prefix = (empty($context['prefix']) ? '' : $context['prefix'] . '-');
+  $output .= strtr($prefix, DIRECTORY_SEPARATOR, '_');
+  // Sanitize basename.
+  $basename_sanitized = strtr($context['basename'], DIRECTORY_SEPARATOR, '_');
+  $output .= $basename_sanitized ;
   $output .= '.zip';
 
   // Prepare the zip-file.
