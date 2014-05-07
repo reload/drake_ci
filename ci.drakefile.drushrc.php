@@ -87,7 +87,7 @@ $filesets['css'] = array(
 );
 
 $filesets['git'] = array(
-  'include' => array('**/.git/**'),
+  'include' => array('.git/**', '**/.git/**'),
 );
 
 /*
